@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VisionScan — Object Detection</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0a0a0f;
+      --surface: #111118;
+      --surface2: #18181f;
+      --border: rgba(255,255,255,0.07);
+      --border-hover: rgba(255,255,255,0.15);
+      --accent: #7c6dfa;
+      --accent2: #e86aff;
+      --text: #f0eeff;
+      --muted: rgba(240,238,255,0.45);
+      --success: #3dffc8;
+      --font-head: 'Syne', sans-serif;
+      --font-mono: 'DM Mono', monospace;
+    }
+
+    html, body {
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-head);
+    }
+
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 0 1rem;
+    }
+
+    /* Noise + grid texture */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        repeating-linear-gradient(0deg, transparent, transparent 39px, rgba(255,255,255,0.015) 40px),
+        repeating-linear-gradient(90deg, transparent, transparent 39px, rgba(255,255,255,0.015) 40px);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* Glow blob */
+    body::after {
+      content: '';
+      position: fixed;
+      top: -200px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 700px;
+      height: 500px;
+      background: radial-gradient(ellipse at center, rgba(124,109,250,0.12) 0%, transparent 70%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .page {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      max-width: 860px;
+      padding: 3rem 0 5rem;
+    }
+
+    /* HEADER */
+    header {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      margin-bottom: 3.5rem;
+      gap: 0.75rem;
+    }
+
+    .logo-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(124,109,250,0.12);
+      border: 1px solid rgba(124,109,250,0.25);
+      border-radius: 100px;
+      padding: 6px 16px 6px 10px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      color: var(--accent);
+      text-transform: uppercase;
+      margin-bottom: 0.5rem;
+    }
+
+    .logo-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    h1 {
+      font-size: clamp(2.8rem, 7vw, 5rem);
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      line-height: 1;
+      background: linear-gradient(135deg, #fff 0%, rgba(255,255,255,0.6) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    h1 span {
+      background: linear-gradient(135deg, var(--accent) 0%, var(--accent2) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .subtitle {
+      font-size: 0.95rem;
+      color: var(--muted);
+      font-weight: 400;
+      max-width: 380px;
+      line-height: 1.6;
+    }
+
+    /* MAIN CARD */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      overflow: hidden;
+      margin-bottom: 2rem;
+    }
+
+    /* UPLOAD ZONE */
+    .upload-zone {
+      position: relative;
+      padding: 2.5rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .drop-area {
+      position: relative;
+      border: 1.5px dashed rgba(124,109,250,0.35);
+      border-radius: 14px;
+      padding: 3rem 2rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1rem;
+      cursor: pointer;
+      transition: all 0.25s ease;
+      background: rgba(124,109,250,0.03);
+      overflow: hidden;
+    }
+
+    .drop-area::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(ellipse at 50% 0%, rgba(124,109,250,0.08) 0%, transparent 70%);
+      opacity: 0;
+      transition: opacity 0.25s ease;
+    }
+
+    .drop-area:hover,
+    .drop-area.drag-over {
+      border-color: rgba(124,109,250,0.7);
+      background: rgba(124,109,250,0.06);
+    }
+
+    .drop-area:hover::before,
+    .drop-area.drag-over::before {
+      opacity: 1;
+    }
+
+    .drop-icon {
+      width: 60px;
+      height: 60px;
+      border-radius: 16px;
+      background: rgba(124,109,250,0.12);
+      border: 1px solid rgba(124,109,250,0.2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .drop-icon svg {
+      width: 28px;
+      height: 28px;
+      stroke: var(--accent);
+    }
+
+    .drop-text {
+      text-align: center;
+    }
+
+    .drop-text strong {
+      display: block;
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 4px;
+    }
+
+    .drop-text span {
+      font-size: 0.8rem;
+      color: var(--muted);
+      font-family: var(--font-mono);
+    }
+
+    .file-input {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      cursor: pointer;
+      width: 100%;
+      height: 100%;
+    }
+
+    /* Preview strip */
+    .preview-strip {
+      display: none;
+      align-items: center;
+      gap: 12px;
+      margin-top: 1.25rem;
+      padding: 12px 16px;
+      background: var(--surface2);
+      border-radius: 10px;
+      border: 1px solid var(--border);
+    }
+
+    .preview-strip.visible { display: flex; }
+
+    .preview-thumb {
+      width: 44px;
+      height: 44px;
+      border-radius: 8px;
+      object-fit: cover;
+      border: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    .preview-info { flex: 1; min-width: 0; }
+    .preview-name {
+      font-size: 0.82rem;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .preview-size {
+      font-size: 0.72rem;
+      color: var(--muted);
+      font-family: var(--font-mono);
+      margin-top: 2px;
+    }
+
+    .preview-remove {
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.06);
+      border: none;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: all 0.2s;
+      font-size: 14px;
+    }
+
+    .preview-remove:hover {
+      background: rgba(255,80,80,0.15);
+      color: #ff8080;
+    }
+
+    /* SUBMIT */
+    .submit-zone {
+      padding: 1.75rem 2.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+
+    .model-tag {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      color: var(--muted);
+    }
+
+    .model-tag-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--success);
+      box-shadow: 0 0 8px var(--success);
+    }
+
+    .btn-detect {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      color: #fff;
+      font-family: var(--font-head);
+      font-size: 0.9rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      border: none;
+      border-radius: 12px;
+      padding: 0.8rem 1.75rem;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .btn-detect::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: rgba(255,255,255,0);
+      transition: background 0.2s;
+    }
+
+    .btn-detect:hover::before { background: rgba(255,255,255,0.08); }
+    .btn-detect:active { transform: scale(0.97); }
+    .btn-detect:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .btn-detect svg {
+      width: 18px; height: 18px;
+      stroke: #fff;
+    }
+
+    /* LOADING */
+    .loading-bar {
+      display: none;
+      width: 100%;
+      height: 2px;
+      background: var(--border);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .loading-bar.active { display: block; }
+
+    .loading-bar::after {
+      content: '';
+      position: absolute;
+      top: 0; bottom: 0; left: -40%;
+      width: 40%;
+      background: linear-gradient(90deg, transparent, var(--accent), var(--accent2), transparent);
+      animation: sweep 1.2s ease-in-out infinite;
+    }
+
+    @keyframes sweep {
+      to { left: 140%; }
+    }
+
+    /* RESULT */
+    .result-section {
+      margin-top: 2rem;
+    }
+
+    .result-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 1.25rem;
+    }
+
+    .result-label {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .result-label::before {
+      content: '';
+      display: block;
+      width: 20px;
+      height: 1px;
+      background: var(--border);
+    }
+
+    .result-badge {
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      color: var(--success);
+      background: rgba(61,255,200,0.1);
+      border: 1px solid rgba(61,255,200,0.2);
+      border-radius: 100px;
+      padding: 4px 12px;
+    }
+
+    .result-img-wrap {
+      position: relative;
+      border-radius: 14px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+    }
+
+    .result-img-wrap img {
+      width: 100%;
+      display: block;
+      border-radius: 14px;
+    }
+
+    .result-img-wrap::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: 14px;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.05);
+      pointer-events: none;
+    }
+
+    .download-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 1rem;
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      font-weight: 500;
+      color: var(--accent);
+      text-decoration: none;
+      background: rgba(124,109,250,0.08);
+      border: 1px solid rgba(124,109,250,0.2);
+      border-radius: 8px;
+      padding: 8px 16px;
+      transition: all 0.2s;
+    }
+
+    .download-btn:hover {
+      background: rgba(124,109,250,0.16);
+      border-color: rgba(124,109,250,0.4);
+    }
+
+    .download-btn svg {
+      width: 14px; height: 14px;
+      stroke: currentColor;
+    }
+
+    /* FOOTER */
+    footer {
+      text-align: center;
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      color: rgba(240,238,255,0.2);
+      margin-top: 3rem;
+      letter-spacing: 0.06em;
+    }
+
+    /* Entrance animation */
+    .card, .result-section {
+      animation: fadeUp 0.5s ease both;
+    }
+
+    .result-section { animation-delay: 0.1s; }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(16px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+
+    <header>
+      <div class="logo-badge">
+        <div class="logo-dot"></div>
+        YOLOv8 — Real-time detection
+      </div>
+      <h1>Vision<span>Scan</span></h1>
+      <p class="subtitle">Upload an image and let the model find every object in milliseconds.</p>
+    </header>
+
+    <form method="POST" enctype="multipart/form-data" id="detect-form">
+      <div class="card">
+
+        <div class="loading-bar" id="loading-bar"></div>
+
+        <div class="upload-zone">
+          <div class="drop-area" id="drop-area">
+            <input
+              type="file"
+              name="image"
+              id="file-input"
+              class="file-input"
+              accept="image/*"
+              required
+            />
+            <div class="drop-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 16.5V19a1 1 0 001 1h14a1 1 0 001-1v-2.5"/>
+                <path d="M12 4v12m-4-4l4-4 4 4"/>
+              </svg>
+            </div>
+            <div class="drop-text">
+              <strong>Drop image here or click to browse</strong>
+              <span>PNG, JPG, WEBP — up to 20MB</span>
+            </div>
+          </div>
+
+          <div class="preview-strip" id="preview-strip">
+            <img class="preview-thumb" id="preview-thumb" src="" alt="" />
+            <div class="preview-info">
+              <div class="preview-name" id="preview-name"></div>
+              <div class="preview-size" id="preview-size"></div>
+            </div>
+            <button type="button" class="preview-remove" id="preview-remove" aria-label="Remove file">✕</button>
+          </div>
+        </div>
+
+        <div class="submit-zone">
+          <div class="model-tag">
+            <div class="model-tag-dot"></div>
+            best.pt loaded
+          </div>
+          <button type="submit" class="btn-detect" id="submit-btn" disabled>
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="7"/>
+              <path d="M11 8v3l2 2M20 20l-3-3"/>
+            </svg>
+            Run Detection
+          </button>
+        </div>
+      </div>
+    </form>
+
+    {% if result_filename %}
+    <div class="result-section">
+      <div class="result-header">
+        <div class="result-label">Detection result</div>
+        <div class="result-badge">✓ complete</div>
+      </div>
+      <div class="result-img-wrap">
+        <img src="{{ url_for('static', filename='results/' + result_filename) }}" alt="Detection result" />
+      </div>
+      <a
+        href="{{ url_for('static', filename='results/' + result_filename) }}"
+        download="{{ result_filename }}"
+        class="download-btn"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 4v12m-4-4l4 4 4-4"/>
+          <path d="M4 18h16"/>
+        </svg>
+        Download result
+      </a>
+    </div>
+    {% endif %}
+
+    <footer>VISIONSCAN · YOLOV8 OBJECT DETECTION · LOCAL INFERENCE</footer>
+
+  </div>
+
+  <script>
+    const fileInput  = document.getElementById('file-input');
+    const dropArea   = document.getElementById('drop-area');
+    const previewStrip = document.getElementById('preview-strip');
+    const previewThumb = document.getElementById('preview-thumb');
+    const previewName  = document.getElementById('preview-name');
+    const previewSize  = document.getElementById('preview-size');
+    const removeBtn  = document.getElementById('preview-remove');
+    const submitBtn  = document.getElementById('submit-btn');
+    const form       = document.getElementById('detect-form');
+    const loadingBar = document.getElementById('loading-bar');
+
+    function fmtSize(b) {
+      if (b < 1024) return b + ' B';
+      if (b < 1024*1024) return (b/1024).toFixed(1) + ' KB';
+      return (b/1024/1024).toFixed(1) + ' MB';
+    }
+
+    function showPreview(file) {
+      const reader = new FileReader();
+      reader.onload = e => { previewThumb.src = e.target.result; };
+      reader.readAsDataURL(file);
+      previewName.textContent = file.name;
+      previewSize.textContent = fmtSize(file.size);
+      previewStrip.classList.add('visible');
+      submitBtn.disabled = false;
+    }
+
+    function clearPreview() {
+      previewStrip.classList.remove('visible');
+      previewThumb.src = '';
+      fileInput.value = '';
+      submitBtn.disabled = true;
+    }
+
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files[0]) showPreview(fileInput.files[0]);
+    });
+
+    removeBtn.addEventListener('click', clearPreview);
+
+    ['dragover','dragenter'].forEach(ev => {
+      dropArea.addEventListener(ev, e => { e.preventDefault(); dropArea.classList.add('drag-over'); });
+    });
+
+    ['dragleave','drop'].forEach(ev => {
+      dropArea.addEventListener(ev, e => {
+        e.preventDefault();
+        dropArea.classList.remove('drag-over');
+        if (ev === 'drop' && e.dataTransfer.files[0]) {
+          fileInput.files = e.dataTransfer.files;
+          showPreview(e.dataTransfer.files[0]);
+        }
+      });
+    });
+
+    form.addEventListener('submit', () => {
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Detecting…';
+      loadingBar.classList.add('active');
+    });
+  </script>
+</body>
+</html>
